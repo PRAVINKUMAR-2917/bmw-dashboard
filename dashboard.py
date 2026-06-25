@@ -90,11 +90,11 @@ st.markdown("""
 # LOAD DATA — file path per page
 # =====================================
 if page == "Sales Contract":
-    EXCEL_FILE = "reports/sales_contract.xlsx"
+    EXCEL_FILE = "sales_contract.xlsx"
 elif page == "Quotation":
-    EXCEL_FILE = "reports/quotation.xlsx"
+    EXCEL_FILE = "quotation.xlsx"
 else:
-    EXCEL_FILE = "reports/retention.xlsx"
+    EXCEL_FILE = "retention.xlsx"
 
 try:
     df = pd.read_excel(EXCEL_FILE, engine="openpyxl")
