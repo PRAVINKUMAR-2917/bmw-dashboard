@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import requests
+from io import BytesIO
 
 # =====================================
 # PAGE CONFIG
@@ -87,17 +89,28 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =====================================
-# LOAD DATA — file path per page
+# ONEDRIVE DIRECT DOWNLOAD URLS
 # =====================================
-if page == "Sales Contract":
-    EXCEL_FILE = "sales_contract.xlsx"
-elif page == "Quotation":
-    EXCEL_FILE = "quotation.xlsx"
-else:
-    EXCEL_FILE = "retention.xlsx"
+# FORMAT: your SharePoint share link + "?download=1" at the end
+# Replace the Sales Contract and Quotation URLs once you have them
+ONEDRIVE_URLS = {
+    "Retention":      "https://infinitycr1-my.sharepoint.com/:x:/g/personal/pravinkumar_m_bmw-infinitycars_in/IQA5uS4P5kbFT4aI6nJSETv4AU6mCIA1K6rMgWGz_n3waVA?download=1",
+    "Sales Contract": "https://infinitycr1-my.sharepoint.com/:x:/g/personal/pravinkumar_m_bmw-infinitycars_in/IQAUL6CF_KLYRrPoU9qAv9wuAbf9c3uJxKZ4F7-Vz7Lu7Kc?download=1",
+    "Quotation":      "https://infinitycr1-my.sharepoint.com/:x:/g/personal/pravinkumar_m_bmw-infinitycars_in/IQBJgr2ET1LxTa5Uhx5EMx3CAUZDADqpCKAwZ9GI9R1MSCg?download=1",
+}
+
+# =====================================
+# LOAD DATA FROM ONEDRIVE
+# =====================================
+@st.cache_data(ttl=300)  # Cache for 5 minutes — refresh button below clears it
+def load_excel_from_onedrive(url: str) -> pd.DataFrame:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response = requests.get(url, headers=headers, timeout=30)
+    response.raise_for_status()
+    return pd.read_excel(BytesIO(response.content), engine="openpyxl")
 
 try:
-    df = pd.read_excel(EXCEL_FILE, engine="openpyxl")
+    df = load_excel_from_onedrive(ONEDRIVE_URLS[page])
 
     if "Quotation Date" in df.columns:
         df["Quotation Date"] = pd.to_datetime(df["Quotation Date"], errors="coerce")
@@ -370,10 +383,12 @@ try:
     st.sidebar.container(height=50, border=False)
 
     # =====================================
-    # ACTION BUTTON
+    # ACTION BUTTON — clears cache & reloads fresh from OneDrive
     # =====================================
     if st.button("🔄 Refresh CRM Data"):
+        st.cache_data.clear()
         st.rerun()
+
     st.divider()
 
     if filtered_df.empty:
@@ -395,12 +410,9 @@ try:
             return f"₹{val:,.0f}"
 
     # =====================================================================
-    # =====================================================================
-    #                     RETENTION PAGE — FULLY REBUILT
-    # =====================================================================
+    #                     RETENTION PAGE
     # =====================================================================
     if page == "Retention":
-
         # ─── Helper: safe sum ────────────────────────────────────────────
         def safe_sum(col):
             return filtered_df[col].sum() if col in filtered_df.columns else 0
@@ -412,7 +424,7 @@ try:
         st.markdown('<div class="section-header">📊 Executive Summary</div>', unsafe_allow_html=True)
 
         total_deals        = len(filtered_df)
-        total_retention_vd = safe_sum("Retention With Vd")          # PRIMARY profit column
+        total_retention_vd = safe_sum("Retention With Vd")
         total_retention_wo = safe_sum("Retention W/O Vd")
         total_vd           = safe_sum("Vd Without Gst")
         total_ex_sr        = safe_sum("Ex Showroom")
@@ -424,21 +436,18 @@ try:
         win_rate           = (positive_deals / total_deals * 100) if total_deals > 0 else 0
         avg_retention_deal = total_retention_vd / total_deals if total_deals > 0 else 0
 
-        # Row 1 — Volume + Revenue
         r1c1, r1c2, r1c3, r1c4 = st.columns(4)
         r1c1.markdown(f'<div class="kpi-card blue"><h4>🚗 Total Deals</h4><h1>{total_deals}</h1></div>', unsafe_allow_html=True)
         r1c2.markdown(f'<div class="kpi-card green"><h4>💰 Total Retention (incl. VD)</h4><h2>{fmt_inr(total_retention_vd)}</h2></div>', unsafe_allow_html=True)
         r1c3.markdown(f'<div class="kpi-card sky"><h4>🔓 Retention (excl. VD)</h4><h2>{fmt_inr(total_retention_wo)}</h2></div>', unsafe_allow_html=True)
         r1c4.markdown(f'<div class="kpi-card teal"><h4>🎯 Volume Discount (VD)</h4><h2>{fmt_inr(total_vd)}</h2></div>', unsafe_allow_html=True)
 
-        # Row 2 — Deal quality
         r2c1, r2c2, r2c3, r2c4 = st.columns(4)
         r2c1.markdown(f'<div class="kpi-card {"green" if avg_retention_deal >= 0 else "red"}"><h4>📈 Avg Retention / Deal</h4><h2>{fmt_inr(avg_retention_deal)}</h2></div>', unsafe_allow_html=True)
         r2c2.markdown(f'<div class="kpi-card purple"><h4>📐 Avg VD %</h4><h1>{avg_vd_pct:.2f}%</h1></div>', unsafe_allow_html=True)
         r2c3.markdown(f'<div class="kpi-card green"><h4>✅ Positive Retention Deals</h4><h1>{positive_deals}</h1></div>', unsafe_allow_html=True)
         r2c4.markdown(f'<div class="kpi-card red"><h4>❌ Negative Retention Deals</h4><h1>{negative_deals}</h1></div>', unsafe_allow_html=True)
 
-        # Win-rate progress bar
         st.markdown(f"""
         <div style="background:#1e293b;border-radius:12px;padding:14px 20px;margin:10px 0 6px 0;color:white;">
           <span style="font-size:0.9rem;font-weight:600;">🏆 Positive Retention Win Rate &nbsp;—&nbsp;
@@ -449,20 +458,17 @@ try:
           </div>
         </div>
         """, unsafe_allow_html=True)
-
         st.divider()
 
         # ─── SECTION 1 : DEAL FLOW & ALLOTMENT TIMELINE ─────────────────
         if "Allot Dt" in filtered_df.columns and not filtered_df["Allot Dt"].dropna().empty:
             st.markdown('<div class="section-header">📅 Deal Flow & Allotment Timeline</div>', unsafe_allow_html=True)
-
             tl = filtered_df.dropna(subset=["Allot Dt"]).copy()
             tl["Week"] = tl["Allot Dt"].dt.to_period("W").apply(lambda r: r.start_time)
             weekly = tl.groupby("Week").agg(
                 Deals=("Vin Number", "count"),
                 Retention=("Retention With Vd", "sum"),
             ).reset_index()
-
             tl["Date"] = tl["Allot Dt"].dt.date
             daily = tl.groupby("Date").agg(
                 Deals=("Vin Number", "count"),
@@ -484,9 +490,7 @@ try:
                 fig_daily.update_yaxes(title_text="# Deals", secondary_y=False)
                 fig_daily.update_yaxes(title_text="₹ Retention", secondary_y=True)
                 st.plotly_chart(fig_daily, use_container_width=True)
-
             with tf2:
-                # Cumulative retention over time — shows business momentum
                 daily_sorted = daily.sort_values("Date").copy()
                 daily_sorted["Cumulative Retention"] = daily_sorted["Retention"].cumsum()
                 daily_sorted["Cumulative Deals"] = daily_sorted["Deals"].cumsum()
@@ -504,12 +508,10 @@ try:
                 fig_cum.update_yaxes(title_text="₹ Cumulative Retention", secondary_y=False)
                 fig_cum.update_yaxes(title_text="Cumulative Deals", secondary_y=True)
                 st.plotly_chart(fig_cum, use_container_width=True)
-
             st.divider()
 
         # ─── SECTION 2 : SERIES & MODEL MIX ────────────────────────────
         st.markdown('<div class="section-header">🚘 Series & Model Performance</div>', unsafe_allow_html=True)
-
         if "Series" in filtered_df.columns:
             series_grp = filtered_df.groupby("Series").agg(
                 Deals=("Vin Number", "count"),
@@ -520,9 +522,7 @@ try:
 
             sm1, sm2 = st.columns(2)
             with sm1:
-                # Stacked bar: deals + avg retention dot
                 fig_ser = make_subplots(specs=[[{"secondary_y": True}]])
-                colors_ser = ["#16a34a" if v >= 0 else "#dc2626" for v in series_grp["Retention"]]
                 fig_ser.add_trace(go.Bar(x=series_grp["Series"], y=series_grp["Deals"],
                                          name="Deals", marker_color="#3b82f6",
                                          text=series_grp["Deals"], textposition="outside"), secondary_y=False)
@@ -535,9 +535,7 @@ try:
                 fig_ser.update_yaxes(title_text="# Deals", secondary_y=False)
                 fig_ser.update_yaxes(title_text="Avg Retention (₹)", secondary_y=True)
                 st.plotly_chart(fig_ser, use_container_width=True)
-
             with sm2:
-                # Total retention by series — green/red
                 sorted_ser = series_grp.sort_values("Retention")
                 bar_colors = ["#16a34a" if v >= 0 else "#dc2626" for v in sorted_ser["Retention"]]
                 fig_ser2 = go.Figure(go.Bar(
@@ -550,7 +548,6 @@ try:
                                        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_ser2, use_container_width=True)
 
-            # Treemap — Model Mix: size = deals, colour = retention
             if "Model" in filtered_df.columns:
                 model_tree = filtered_df.groupby(["Series", "Model"]).agg(
                     Deals=("Vin Number", "count"),
@@ -563,12 +560,10 @@ try:
                 )
                 fig_tm.update_layout(height=420)
                 st.plotly_chart(fig_tm, use_container_width=True)
-
         st.divider()
 
         # ─── SECTION 3 : RETENTION WATERFALL (Deal Economics) ───────────
         st.markdown('<div class="section-header">💧 Deal Economics — How Retention is Built</div>', unsafe_allow_html=True)
-
         wf_components = {
             "Margin\n(with GST)":  safe_sum("Margin With GST"),
             "(-) Matrix\nDiscount": -abs(safe_sum("Matrix Discount")),
@@ -581,7 +576,7 @@ try:
         }
         wf_df = pd.DataFrame({"Component": list(wf_components.keys()), "Value": list(wf_components.values())})
         wf_colors = ["#16a34a" if v >= 0 else "#dc2626" for v in wf_df["Value"]]
-        wf_colors[-1] = "#2563eb"  # highlight net
+        wf_colors[-1] = "#2563eb"
 
         we1, we2 = st.columns([3, 2])
         with we1:
@@ -594,15 +589,12 @@ try:
             fig_wf.update_layout(title="Aggregated Retention Build-up (₹)", height=420,
                                  plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_wf, use_container_width=True)
-
         with we2:
-            # Margin composition donut
             pos_components = {k: v for k, v in {
                 "Margin (GST)": safe_sum("Margin With GST"),
                 "VD": safe_sum("Vd Without Gst"),
                 "Exchange Bonus": safe_sum("Exchange Bonus"),
                 "Corp RM": safe_sum("Corp Rm"),
-                "My 2024": safe_sum("My 2024"),
             }.items() if v > 0}
             if pos_components:
                 fig_donut = px.pie(
@@ -615,13 +607,11 @@ try:
                 fig_donut.update_traces(textinfo="percent+label")
                 fig_donut.update_layout(height=420)
                 st.plotly_chart(fig_donut, use_container_width=True)
-
         st.divider()
 
         # ─── SECTION 4 : CONSULTANT PERFORMANCE ─────────────────────────
         if "Sales Consultant" in filtered_df.columns:
             st.markdown('<div class="section-header">👨‍💼 Sales Consultant Performance</div>', unsafe_allow_html=True)
-
             sc_grp = filtered_df.groupby("Sales Consultant").agg(
                 Deals=("Vin Number", "count"),
                 TotalRetention=("Retention With Vd", "sum"),
@@ -635,7 +625,6 @@ try:
 
             cp1, cp2 = st.columns(2)
             with cp1:
-                # Horizontal bar — total retention
                 sc_sorted = sc_grp.sort_values("TotalRetention")
                 bar_clrs = ["#16a34a" if v >= 0 else "#dc2626" for v in sc_sorted["TotalRetention"]]
                 fig_sc_ret = go.Figure(go.Bar(
@@ -647,9 +636,7 @@ try:
                 fig_sc_ret.update_layout(title="💰 Total Retention by Consultant", height=420,
                                          plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_sc_ret, use_container_width=True)
-
             with cp2:
-                # Stacked bar — positive vs negative deals
                 fig_sc_stack = go.Figure()
                 fig_sc_stack.add_bar(name="✅ Positive", x=sc_grp["Sales Consultant"],
                                      y=sc_grp["PositiveDeals"], marker_color="#16a34a",
@@ -663,7 +650,6 @@ try:
                                            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_sc_stack, use_container_width=True)
 
-            # Quadrant: Win Rate vs Avg Retention/Deal
             fig_quad = px.scatter(
                 sc_grp, x="WinRate", y="RetentionPerDeal", size="Deals",
                 color="TotalRetention", color_continuous_scale=["#dc2626", "#fbbf24", "#16a34a"],
@@ -677,7 +663,6 @@ try:
             fig_quad.update_layout(height=440, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_quad, use_container_width=True)
 
-            # Leaderboard table
             st.subheader("🏆 Consultant Leaderboard")
             lb = sc_grp.sort_values("TotalRetention", ascending=False)[
                 ["Sales Consultant", "Deals", "PositiveDeals", "NegativeDeals",
@@ -692,12 +677,10 @@ try:
             lb = lb.reset_index(drop=True)
             lb.index += 1
             st.dataframe(lb, use_container_width=True)
-
             st.divider()
 
         # ─── SECTION 5 : DISCOUNT ANATOMY ───────────────────────────────
         st.markdown('<div class="section-header">🔬 Discount Anatomy — Where the Money Goes</div>', unsafe_allow_html=True)
-
         disc_map = {
             "Matrix Discount": "Matrix Disc",
             "Insurance Discount": "Insurance Disc",
@@ -732,7 +715,6 @@ try:
                                         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_bar_d, use_container_width=True)
 
-        # Discount by Series stacked
         if "Series" in filtered_df.columns:
             agg_disc = {col: "sum" for col in ["Matrix Discount", "Insurance Discount", "SPL Discount Mgmt", "Inhouse Finance Support"]
                         if col in filtered_df.columns}
@@ -748,13 +730,11 @@ try:
                                             title="📦 Stacked Discount by Series — which model costs most in discounts",
                                             height=380, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_disc_ser, use_container_width=True)
-
         st.divider()
 
         # ─── SECTION 6 : VD% ANALYSIS ───────────────────────────────────
         if "Vd Percentage" in filtered_df.columns and filtered_df["Vd Percentage"].notna().any():
             st.markdown('<div class="section-header">📐 Volume Discount (VD%) Deep Dive</div>', unsafe_allow_html=True)
-
             vd1, vd2 = st.columns(2)
             with vd1:
                 fig_vd_hist = px.histogram(filtered_df, x="Vd Percentage", nbins=12,
@@ -765,10 +745,8 @@ try:
                                       annotation_text=f"Avg: {avg_vd:.2f}%")
                 fig_vd_hist.update_layout(height=360, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_vd_hist, use_container_width=True)
-
             with vd2:
                 if "Series" in filtered_df.columns:
-                    vd_ser = filtered_df.groupby("Series")["Vd Percentage"].agg(["mean", "min", "max"]).reset_index()
                     fig_vd_box = go.Figure()
                     for s in filtered_df["Series"].dropna().unique():
                         vals = filtered_df[filtered_df["Series"] == s]["Vd Percentage"].dropna()
@@ -778,7 +756,6 @@ try:
                                              plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                     st.plotly_chart(fig_vd_box, use_container_width=True)
 
-            # VD% vs Retention scatter — the key strategic insight
             if "Retention With Vd" in filtered_df.columns:
                 vd_scatter = filtered_df[["Vd Percentage", "Retention With Vd", "Retention W/O Vd", "Model", "Series"]].dropna(subset=["Vd Percentage", "Retention With Vd"])
                 fig_vd_scat = px.scatter(
@@ -790,12 +767,10 @@ try:
                 fig_vd_scat.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Break-even")
                 fig_vd_scat.update_layout(height=400, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_vd_scat, use_container_width=True)
-
             st.divider()
 
         # ─── SECTION 7 : SCHEME & DEAL TYPE ANALYSIS ────────────────────
         st.markdown('<div class="section-header">🎁 Scheme & Deal Type — Flexi / Corporate / Trade-In</div>', unsafe_allow_html=True)
-
         sc7a, sc7b, sc7c = st.columns(3)
         with sc7a:
             if "Flexi" in filtered_df.columns:
@@ -825,7 +800,6 @@ try:
                 fig_ti.update_traces(textinfo="percent+label")
                 st.plotly_chart(fig_ti, use_container_width=True)
 
-        # Scheme impact on retention
         scheme_rows = []
         for col, label in [("Flexi", "Flexi"), ("Corporate", "Corporate"), ("Trade In/ Exchange", "Trade-In")]:
             if col in filtered_df.columns:
@@ -836,7 +810,6 @@ try:
                 grp["Scheme Type"] = label
                 grp.rename(columns={label: "Scheme Value"}, inplace=True)
                 scheme_rows.append(grp)
-
         if scheme_rows:
             scheme_impact = pd.concat(scheme_rows, ignore_index=True)
             fig_scheme = px.bar(
@@ -850,12 +823,10 @@ try:
             fig_scheme.update_layout(height=400, xaxis_tickangle=-20,
                                      plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_scheme, use_container_width=True)
-
         st.divider()
 
         # ─── SECTION 8 : COLOR & SPECIFICATION TRENDS ───────────────────
         st.markdown('<div class="section-header">🎨 Color & Specification Trends</div>', unsafe_allow_html=True)
-
         col8a, col8b = st.columns(2)
         with col8a:
             if "Color" in filtered_df.columns:
@@ -883,13 +854,11 @@ try:
                 fig_int.update_layout(xaxis_tickangle=-35, height=380,
                                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_int, use_container_width=True)
-
         st.divider()
 
         # ─── SECTION 9 : MODEL-LEVEL PROFITABILITY MATRIX ───────────────
         if "Model" in filtered_df.columns:
             st.markdown('<div class="section-header">🧩 Model-Level Retention Matrix</div>', unsafe_allow_html=True)
-
             model_mat = filtered_df.groupby("Model").agg(
                 Deals=("Vin Number", "count"),
                 TotalRetention=("Retention With Vd", "sum"),
@@ -915,7 +884,6 @@ try:
                 fig_mm.update_layout(title="🏅 Total Retention by Model (Top 12)", height=420,
                                      plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_mm, use_container_width=True)
-
             with mm2:
                 fig_mm2 = px.scatter(
                     model_mat, x="Deals", y="AvgRetention",
@@ -929,7 +897,6 @@ try:
                 fig_mm2.update_layout(height=420, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_mm2, use_container_width=True)
 
-            # Summary table
             st.subheader("📋 Full Model Retention Table")
             disp_mm = model_mat.sort_values("TotalRetention", ascending=False).copy()
             disp_mm["TotalRetention"] = disp_mm["TotalRetention"].apply(fmt_inr)
@@ -943,7 +910,6 @@ try:
             disp_mm = disp_mm.rename(columns=rename_mm).reset_index(drop=True)
             disp_mm.index += 1
             st.dataframe(disp_mm, use_container_width=True)
-
             st.divider()
 
         # ─── SECTION 10 : DISCOUNT EFFICIENCY BY CONSULTANT ─────────────
@@ -951,7 +917,6 @@ try:
                          if c in filtered_df.columns]
         if disc_eff_cols and "Sales Consultant" in filtered_df.columns:
             st.markdown('<div class="section-header">⚖️ Discount Efficiency — Retention per ₹ Discounted</div>', unsafe_allow_html=True)
-
             eff = filtered_df.copy()
             eff["TotalDiscount"] = eff[disc_eff_cols].fillna(0).sum(axis=1)
             eff_grp = eff.groupby("Sales Consultant").agg(
@@ -977,7 +942,6 @@ try:
                 fig_ef1.add_hline(y=0, line_dash="dash", line_color="gray")
                 fig_ef1.update_layout(height=400, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_ef1, use_container_width=True)
-
             with ef2:
                 eff_sorted = eff_grp.sort_values("RetentionPerDiscountRupee")
                 clrs_ef = ["#16a34a" if v >= 0 else "#dc2626" for v in eff_sorted["RetentionPerDiscountRupee"]]
@@ -990,22 +954,18 @@ try:
                 fig_ef2.update_layout(title="💡 Retention per ₹1 of Discount Given",
                                       height=400, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_ef2, use_container_width=True)
-
             st.divider()
 
         # ─── SECTION 11 : CORRELATION HEATMAP ───────────────────────────
         st.markdown('<div class="section-header">🧠 What Drives Retention — Correlation Analysis</div>', unsafe_allow_html=True)
-
         driver_cols = [c for c in [
             "Ex Showroom Offered", "Matrix Discount", "Insurance Discount",
             "SPL Discount Mgmt", "Vd Percentage", "Margin With GST",
             "Ctc", "Retention W/O Vd", "Retention With Vd",
         ] if c in filtered_df.columns]
-
         corr_df = filtered_df[driver_cols].dropna(how="all")
         if len(corr_df) >= 3 and "Retention With Vd" in corr_df.columns:
             corr_mat = corr_df.corr()
-
             cd1, cd2 = st.columns(2)
             with cd1:
                 fig_heat = go.Figure(data=go.Heatmap(
@@ -1016,7 +976,6 @@ try:
                 ))
                 fig_heat.update_layout(title="🔥 Correlation Heatmap — All Deal Variables", height=460)
                 st.plotly_chart(fig_heat, use_container_width=True)
-
             with cd2:
                 ret_corr = corr_mat["Retention With Vd"].drop("Retention With Vd").sort_values()
                 clrs_corr = ["#16a34a" if v >= 0 else "#dc2626" for v in ret_corr.values]
@@ -1029,10 +988,8 @@ try:
                 fig_drv.update_layout(title="🎯 Correlation with Retention (incl. VD)",
                                       height=460, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_drv, use_container_width=True)
-
             st.caption("💡 Correlation shows direction & strength of linear relationship only — not causation. "
                        "+1 = rises with Retention; −1 = falls as Retention rises.")
-
         st.divider()
 
         # ─── SECTION 12 : DEAL-LEVEL DETAIL TABLE ───────────────────────
@@ -1051,18 +1008,14 @@ try:
             detail["Allot Dt"] = pd.to_datetime(detail["Allot Dt"]).dt.strftime("%Y-%m-%d")
             detail = detail.sort_values("Allot Dt", ascending=False)
         st.dataframe(detail, use_container_width=True, hide_index=True, height=450)
-
         csv_data = detail.to_csv(index=False).encode("utf-8")
         st.download_button("⬇️ Export Filtered Data as CSV", data=csv_data,
                            file_name="retention_filtered.csv", mime="text/csv")
 
     # =====================================================================
-    #              SALES CONTRACT / QUOTATION  (UNCHANGED — PAGES 1 & 2)
+    #              SALES CONTRACT / QUOTATION
     # =====================================================================
     else:
-        # =====================================
-        # KPI VALUES (COMMON)
-        # =====================================
         total_records = len(filtered_df)
         unique_customers = filtered_df["Customer Name"].nunique() if "Customer Name" in filtered_df.columns else 0
         total_models = filtered_df["Model"].nunique() if "Model" in filtered_df.columns else 0
@@ -1099,9 +1052,6 @@ try:
         else:
             top_status = "-"
 
-        # =====================================
-        # KPI ROW 1
-        # =====================================
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.markdown(f'<div class="kpi-card green"><h4>{main_kpi_title}</h4><h1>{total_records}</h1></div>', unsafe_allow_html=True)
@@ -1112,9 +1062,6 @@ try:
         with c4:
             st.markdown(f'<div class="kpi-card purple"><h4>Models</h4><h1>{total_models}</h1></div>', unsafe_allow_html=True)
 
-        # =====================================
-        # KPI ROW 2
-        # =====================================
         k1, k2, k3, k4 = st.columns(4)
         k1.info(f"🏆 Top Model\n\n{top_model}")
         k2.success(f"👨‍💼 Top Sales Person\n\n{top_salesperson}")
@@ -1125,7 +1072,7 @@ try:
             k4.error(f"📋 Top Status\n\n{top_status}")
 
         # =====================================================================
-        # QUOTATION-SPECIFIC EDA / ANALYTICS SECTION
+        # QUOTATION ANALYTICS
         # =====================================================================
         if page == "Quotation":
             st.divider()
@@ -1148,6 +1095,7 @@ try:
             e2.markdown(f'<div class="kpi-card orange"><h4>⏳ Pending</h4><h1>{pending_count}</h1></div>', unsafe_allow_html=True)
             e3.markdown(f'<div class="kpi-card red"><h4>❌ Rejected</h4><h1>{rejected_count}</h1></div>', unsafe_allow_html=True)
             e4.markdown(f'<div class="kpi-card teal"><h4>📈 Conversion Rate</h4><h1>{conversion_rate}%</h1></div>', unsafe_allow_html=True)
+
             st.markdown("")
             r1c1, r1c2 = st.columns(2)
             with r1c1:
@@ -1166,6 +1114,7 @@ try:
                     fig = px.bar(cat_counts, x="Category", y="Count", color="Category", text="Count")
                     fig.update_layout(showlegend=False)
                     st.plotly_chart(fig, use_container_width=True)
+
             r2c1, r2c2 = st.columns(2)
             with r2c1:
                 if "Model" in filtered_df.columns and not filtered_df.empty:
@@ -1184,6 +1133,7 @@ try:
                                   color_discrete_sequence=px.colors.qualitative.Set2)
                     fig.update_traces(textinfo="percent+label")
                     st.plotly_chart(fig, use_container_width=True)
+
             r3c1, r3c2 = st.columns(2)
             with r3c1:
                 if "Sales Person" in filtered_df.columns and "Status" in filtered_df.columns and not filtered_df.empty:
@@ -1199,6 +1149,7 @@ try:
                     fig = px.bar(appr_counts, x="Approval Person", y="Count", color="Approval Person", text="Count")
                     fig.update_layout(showlegend=False)
                     st.plotly_chart(fig, use_container_width=True)
+
             r4c1, r4c2 = st.columns(2)
             with r4c1:
                 if "Bank" in filtered_df.columns and not filtered_df.empty:
@@ -1216,6 +1167,7 @@ try:
                     fig = px.bar(ins_counts, x="Insurance Company", y="Count", color="Insurance Company", text="Count")
                     fig.update_layout(showlegend=False)
                     st.plotly_chart(fig, use_container_width=True)
+
             r5c1, r5c2 = st.columns(2)
             with r5c1:
                 if "Exterior" in filtered_df.columns and not filtered_df.empty:
@@ -1233,6 +1185,7 @@ try:
                     fig = px.bar(int_counts, x="Interior", y="Count", color="Interior", text="Count")
                     fig.update_layout(showlegend=False)
                     st.plotly_chart(fig, use_container_width=True)
+
             if "Quotation Date" in filtered_df.columns and not filtered_df["Quotation Date"].dropna().empty:
                 st.subheader("📈 Quotation Trend Over Time")
                 trend_df = filtered_df.dropna(subset=["Quotation Date"]).copy()
@@ -1240,6 +1193,7 @@ try:
                 trend_counts = trend_df.groupby("Date").size().reset_index(name="Quotations")
                 fig = px.line(trend_counts, x="Date", y="Quotations", markers=True)
                 st.plotly_chart(fig, use_container_width=True)
+
             r7c1, r7c2 = st.columns(2)
             with r7c1:
                 if "GST Number" in filtered_df.columns and not filtered_df.empty:
@@ -1261,7 +1215,7 @@ try:
                     st.plotly_chart(fig, use_container_width=True)
 
         # =====================================================================
-        # SALES CONTRACT-SPECIFIC EDA / ANALYTICS SECTION
+        # SALES CONTRACT ANALYTICS
         # =====================================================================
         else:
             st.divider()
@@ -1287,6 +1241,7 @@ try:
             s2.markdown(f'<div class="kpi-card green"><h4>💵 Cash Deals</h4><h1>{cash_deals}</h1></div>', unsafe_allow_html=True)
             s3.markdown(f'<div class="kpi-card purple"><h4>🏢 Corporate Deals</h4><h1>{corporate_deals}</h1></div>', unsafe_allow_html=True)
             s4.markdown(f'<div class="kpi-card orange"><h4>🛡️ Insured Deals</h4><h1>{with_insurance}</h1></div>', unsafe_allow_html=True)
+
             st.markdown("")
             col_chart1, col_chart2 = st.columns(2)
             with col_chart1:
@@ -1335,6 +1290,7 @@ try:
                         fig = px.bar(bank_counts, x="Bank", y="Count", color="Bank", text="Count")
                         fig.update_layout(showlegend=False)
                         st.plotly_chart(fig, use_container_width=True)
+
             col_chart3, col_chart4 = st.columns(2)
             with col_chart3:
                 if "Exterior Color" in filtered_df.columns and not filtered_df.empty:
@@ -1352,6 +1308,7 @@ try:
                     fig = px.bar(int_counts, x="Interior Color", y="Count", color="Interior Color", text="Count")
                     fig.update_layout(showlegend=False)
                     st.plotly_chart(fig, use_container_width=True)
+
             if "Quotation Date" in filtered_df.columns and not filtered_df["Quotation Date"].dropna().empty:
                 st.subheader("📈 Sales Trend Over Time")
                 trend_df = filtered_df.dropna(subset=["Quotation Date"]).copy()
@@ -1359,6 +1316,7 @@ try:
                 trend_counts = trend_df.groupby("Date").size().reset_index(name="Sales")
                 fig = px.line(trend_counts, x="Date", y="Sales", markers=True)
                 st.plotly_chart(fig, use_container_width=True)
+
             col_chart5, col_chart6 = st.columns(2)
             with col_chart5:
                 if "GST No" in filtered_df.columns and not filtered_df.empty:
@@ -1380,7 +1338,7 @@ try:
                     st.plotly_chart(fig, use_container_width=True)
 
         # =====================================================================
-        # DETAILED RECORDS TABLE (NO SENSITIVE CUSTOMER DATA)
+        # DETAILED RECORDS TABLE
         # =====================================================================
         st.divider()
         st.subheader("📋 Detailed Records")
@@ -1401,5 +1359,16 @@ try:
             summary_df = summary_df.sort_values(by="Quotation Date", ascending=False)
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-except FileNotFoundError:
-    st.error(f"❌ File not found: {EXCEL_FILE}")
+# =====================================================================
+# ERROR HANDLING
+# =====================================================================
+except requests.exceptions.HTTPError as e:
+    st.error(f"❌ Could not download file from OneDrive. HTTP Error: {e}")
+    st.info("💡 Make sure your OneDrive link is set to 'Anyone with the link can view' and ends with `?download=1`")
+except requests.exceptions.ConnectionError:
+    st.error("❌ Network error — could not reach OneDrive. Check your internet connection.")
+except requests.exceptions.Timeout:
+    st.error("❌ Request timed out. OneDrive took too long to respond. Try refreshing.")
+except Exception as e:
+    st.error(f"❌ Unexpected error: {e}")
+    st.exception(e)
